@@ -120,6 +120,7 @@ public class ProductoService {
         dto.setPrecioVenta(entity.getPrecioVenta());
         dto.setIva5(entity.getIva5());
         dto.setIva10(entity.getIva10());
+        dto.setCantidad(entity.getCantidad());
         dto.setProveedor(entity.getProveedor() != null ? entity.getProveedor().getId() : null);
         return dto;
     }
@@ -133,6 +134,7 @@ public class ProductoService {
         entity.setPrecioVenta(dto.getPrecioVenta());
         entity.setIva5(dto.getIva5());
         entity.setIva10(dto.getIva10());
+        entity.setCantidad(dto.getCantidad());
 
         if (dto.getProveedor() != null) {
             ProveedorEntity proveedor = proveedorRepository.findById(dto.getProveedor())
