@@ -2,7 +2,6 @@ package org.sommiersys.sommiersys.controller.producto;
 
 import org.pack.sommierJar.dto.producto.ProductoDto;
 import org.sommiersys.sommiersys.common.interfaces.IBaseController;
-import org.sommiersys.sommiersys.service.cliente.ClienteService;
 import org.sommiersys.sommiersys.service.producto.ProductoService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
@@ -39,7 +38,7 @@ public class ProductoController implements IBaseController<ProductoDto> {
     }
 
     @Override
-    public ResponseEntity update(@Validated @PathVariable final Long id,@Validated @RequestParam ProductoDto dto) {
+    public ResponseEntity update(@Validated @PathVariable final Long id,@Validated @RequestBody ProductoDto dto) {
         return new ResponseEntity<>(productoService.update(id, dto), HttpStatus.OK);
     }
 

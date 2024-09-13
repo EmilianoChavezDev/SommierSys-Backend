@@ -10,6 +10,8 @@ import org.sommiersys.sommiersys.common.interfaces.IBaseService;
 import org.pack.sommierJar.entity.cliente.ClienteEntity;
 import org.sommiersys.sommiersys.repository.cliente.ClienteRepository;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.cache.CacheManager;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -31,6 +33,10 @@ public class ClienteService implements IBaseService<ClienteDto> {
 
 
 
+    @Autowired
+    private CacheManager cacheManager;
+
+
 
     @Override
     public Page<ClienteDto> findAll(Pageable pageable) {
@@ -45,6 +51,8 @@ public class ClienteService implements IBaseService<ClienteDto> {
     }
 
     @Override
+    @Cacheable(cacheManager = "cacheManagerWithoutTTL", value = "sd", key = "'api_cliente_' + #id")
+    @Transactional(readOnly = true, propagation = Propagation.SUPPORTS, rollbackFor = Exception.class)
     public Optional<ClienteDto> findById(Long id) {
         Optional<ClienteEntity> clienteEntity = clienteRepository.findById(id);
         return clienteEntity.map(cliente -> modelMapper.map(cliente, ClienteDto.class));

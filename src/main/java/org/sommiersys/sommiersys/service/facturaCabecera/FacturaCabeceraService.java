@@ -1,6 +1,6 @@
 package org.sommiersys.sommiersys.service.facturaCabecera;
 
-import jakarta.persistence.FetchType;
+
 import org.modelmapper.ModelMapper;
 
 import org.pack.sommierJar.dto.facturaCabecera.FacturaCabeceraDto;
@@ -23,7 +23,6 @@ import org.sommiersys.sommiersys.service.producto.ProductoService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
-import org.springframework.data.repository.cdi.Eager;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -77,26 +76,22 @@ public class FacturaCabeceraService implements IBaseService<FacturaCabeceraDto> 
         @Transactional(rollbackFor = Exception.class)
         public FacturaCabeceraDto save(FacturaCabeceraDto dto) {
             try {
-                // Convertir DTO a entidad
                 FacturaCabeceraEntity entity = new FacturaCabeceraEntity();
-                entity.setNumeroFactura(generateFacturaNumber());
                 entity.setEsCompra(dto.getEsCompra());
                 entity.setIva5(dto.getIva5());
                 entity.setIva10(dto.getIva10());
                 entity.setFecha(LocalDate.from(LocalDateTime.now()));
+                entity.setNumeroFactura(entity.getEsCompra() ? "0" : generateFacturaNumber());
 
-//                // Asignar cliente si está presente
                 if (dto.getClienteId() != null) {
                     ClienteEntity cliente = clienteRepository.findById(dto.getClienteId())
                             .orElseThrow(() -> new ControllerRequestException("No existe el cliente con ID " + dto.getClienteId()));
                     entity.setCliente(cliente);
                 }
 
-
-                // Guardar la entidad de factura cabecera sin los detalles primero
                 FacturaCabeceraEntity savedEntity = facturaCabeceraRepository.save(entity);
+                List<FacturaDetalleEntity> det = new ArrayList<>();
 
-                // Procesar y guardar los detalles de la factura
                 double total = 0.0;
                 double totalIva5 = 0.0;
                 double totalIva10 = 0.0;
@@ -105,10 +100,10 @@ public class FacturaCabeceraService implements IBaseService<FacturaCabeceraDto> 
                     ProductoEntity producto = productoRepository.findById(detalleDto.getProducto())
                             .orElseThrow(() -> new ControllerRequestException("No existe el producto con ID " + detalleDto.getProducto()));
 
-                    // Calcular subtotal, IVA y asignar producto
+                    // Calcular subtotal, IVA
                     FacturaDetalleEntity detalleEntity = new FacturaDetalleEntity();
                     detalleEntity.setCantidad(detalleDto.getCantidad());
-                    detalleEntity.setPrecioUnitario(producto.getPrecioVenta());
+                    detalleEntity.setPrecioUnitario(entity.getEsCompra() ? producto.getPrecioCompra() : producto.getPrecioVenta());
                     detalleEntity.setIva5(producto.getIva5());
                     detalleEntity.setIva10(producto.getIva10());
                     detalleEntity.setProducto(producto);
@@ -127,10 +122,15 @@ public class FacturaCabeceraService implements IBaseService<FacturaCabeceraDto> 
                     totalIva5 += iva5;
                     totalIva10 += iva10;
 
+
                     // Asignar la factura cabecera guardada al detalle
                     detalleEntity.setFactura(savedEntity);
+                    det.add(detalleEntity);
 
-                    // Guardar el detalle en la base de datos
+                    producto.setCantidad(savedEntity.getEsCompra() ?  producto.getCantidad() + detalleEntity.getCantidad() : producto.getCantidad() - detalleEntity.getCantidad());
+
+
+                    productoRepository.save(producto);
                     facturaDetalleRepository.save(detalleEntity);
                 }
 
@@ -139,26 +139,29 @@ public class FacturaCabeceraService implements IBaseService<FacturaCabeceraDto> 
                 savedEntity.setIva5(totalIva5);
                 savedEntity.setIva10(totalIva10);
 
-                // Guardar la entidad de la factura con los detalles actualizados
-                facturaCabeceraRepository.save(savedEntity);
 
-            List<FacturaDetalleDto> detalles = new ArrayList<>();
+                savedEntity = facturaCabeceraRepository.save(savedEntity);
 
-            for(FacturaDetalleEntity entities : savedEntity.getFacturaDetalles()){
-                detalles.add(modelMapper.map(entities, FacturaDetalleDto.class));
-            }
-
-                // Ajustar el stock si es una compra
-                if (savedEntity.getEsCompra()) {
-                    for (FacturaDetalleEntity detalle : savedEntity.getFacturaDetalles()) {
-                        productoService.updateStock(detalle.getProducto().getId(), detalle.getCantidad());
-                    }
+                List<FacturaDetalleDto> detalles = new ArrayList<>();
+                for (FacturaDetalleEntity detalle : det) {
+                    FacturaDetalleDto detalleDto = new FacturaDetalleDto();
+                    detalleDto.setId(detalle.getId());
+                    detalleDto.setCantidad(detalle.getCantidad());
+                    detalleDto.setPrecioUnitario(detalle.getPrecioUnitario());
+                    detalleDto.setIva5(detalle.getIva5());
+                    detalleDto.setIva10(detalle.getIva10());
+                    detalleDto.setProducto(detalle.getProducto().getId());
+                    detalleDto.setSubtotal(detalle.getSubtotal());
+                    detalles.add(detalleDto);
                 }
 
+
+
+
+
+
                 FacturaCabeceraDto cabeDto = modelMapper.map(savedEntity, FacturaCabeceraDto.class);
-                cabeDto.setFacturaDetalles(dto.getFacturaDetalles());
-
-
+                cabeDto.setFacturaDetalles(detalles);
                 return cabeDto;
             } catch (Exception e) {
                   logger.error("Error al guardar la factura", e);
@@ -168,18 +171,8 @@ public class FacturaCabeceraService implements IBaseService<FacturaCabeceraDto> 
 
 
 
-    private FacturaDetalleEntity convertToFacturaDetalleEntity(FacturaDetalleDto dto) {
-        FacturaDetalleEntity entity = modelMapper.map(dto, FacturaDetalleEntity.class);
-        ProductoEntity producto = productoRepository.findById(dto.getProducto()).orElseThrow(() -> new ControllerRequestException("Producto no encontrado"));
-        entity.setProducto(producto);
-        return entity;
-    }
-
-
-
     private void imprimirFactura(FacturaCabeceraEntity entity) {
-        // Implementar la lógica para imprimir la factura
-        // Esto podría involucrar generar un PDF y enviarlo a una impresora o guardarlo en un archivo
+
     }
 
 

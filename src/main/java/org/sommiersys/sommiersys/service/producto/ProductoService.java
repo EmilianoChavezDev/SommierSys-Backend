@@ -87,18 +87,39 @@ public class ProductoService {
     }
 
     @Transactional
-    public void updateStock(Long productoId, Integer cantidad) {
+    public void updateStock(Long productoId, Integer cantidad, boolean esCompra) {
         try {
             ProductoEntity producto = productoRepository.findById(productoId)
                     .orElseThrow(() -> new ControllerRequestException("No existe el producto con ID " + productoId));
-            // Aquí asumimos que el stock se gestiona con la cantidad en el producto
-            producto.setCantidad(producto.getCantidad() + cantidad); // Ajustar la lógica según cómo gestiones el stock
+
+            logger.info("Stock antes de la actualización: " + producto.getCantidad());
+
+            if (cantidad == null || cantidad < 0) {
+                throw new ControllerRequestException("Cantidad no válida para el producto con ID " + productoId);
+            }
+
+            // Ajustar el stock según si es una compra o una venta
+            if (esCompra) {
+                producto.setCantidad(producto.getCantidad() + cantidad);
+            } else {
+                if (producto.getCantidad() < cantidad) {
+                    throw new ControllerRequestException("No hay suficiente stock para el producto con ID " + productoId);
+                }
+                producto.setCantidad(producto.getCantidad() - cantidad);
+            }
+
             productoRepository.save(producto);
+
+        } catch (ControllerRequestException e) {
+            logger.error("Error en la solicitud para actualizar el stock del producto con ID " + productoId + ": " + e.getMessage(), e);
+            throw e;
         } catch (Exception e) {
-            logger.error("Error al actualizar el stock del producto con ID " + productoId, e);
+            logger.error("Error inesperado al actualizar el stock del producto con ID " + productoId, e);
             throw new ControllerRequestException("Error al actualizar el stock del producto", e);
         }
     }
+
+
 
     @Transactional(readOnly = true, propagation = Propagation.SUPPORTS)
     public Page<ProductoDto> findByNombre(String nombre, Pageable pageable) {

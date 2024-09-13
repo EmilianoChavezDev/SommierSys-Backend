@@ -14,6 +14,12 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
+import org.springframework.cache.Cache;
+import org.springframework.cache.CacheManager;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.CachePut;
+import org.springframework.cache.annotation.Cacheable;
+
 import java.util.Optional;
 
 
@@ -24,6 +30,7 @@ public class ClienteController implements IBaseController<ClienteDto> {
 
     @Autowired
     private ClienteService clienteService;
+
 
 
     @Override
