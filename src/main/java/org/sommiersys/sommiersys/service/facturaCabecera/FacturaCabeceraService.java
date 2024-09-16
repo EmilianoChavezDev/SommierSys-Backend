@@ -21,6 +21,7 @@ import org.sommiersys.sommiersys.repository.producto.ProductoRepository;
 import org.sommiersys.sommiersys.service.facturaDetalle.FacturaDetalleService;
 import org.sommiersys.sommiersys.service.producto.ProductoService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.cache.annotation.CachePut;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -44,11 +45,6 @@ public class FacturaCabeceraService implements IBaseService<FacturaCabeceraDto> 
     @Autowired
     private FacturaDetalleRepository facturaDetalleRepository;
 
-    @Autowired
-    private FacturaDetalleService facturaDetalleService;
-
-    @Autowired
-    private ProductoService productoService;
 
     @Autowired
     private ProductoRepository productoRepository;
@@ -62,16 +58,28 @@ public class FacturaCabeceraService implements IBaseService<FacturaCabeceraDto> 
     @Override
     public Page<FacturaCabeceraDto> findAll(Pageable pageable) {
         Page<FacturaCabeceraEntity> entities = facturaCabeceraRepository.findAll(pageable);
-        return entities.map(entity -> modelMapper.map(entity, FacturaCabeceraDto.class));
+        return entities.map(entity -> {
+            FacturaCabeceraDto dto = modelMapper.map(entity, FacturaCabeceraDto.class);
+            dto.setFacturaDetalles(entity.getFacturaDetalles()
+                    .stream()
+                    .map(det -> modelMapper.map(det, FacturaDetalleDto.class))
+                    .collect(Collectors.toList()));
+            return dto;
+        });
     }
 
-    @Override
+    @CachePut(cacheManager = "cacheManagerWithoutTTL", value = "sd", key = "'api_facturas_' + #id")
+    @Transactional(readOnly = true)
     public Optional<FacturaCabeceraDto> findById(Long id) {
-        Optional<FacturaCabeceraEntity> entity = facturaCabeceraRepository.findById(id);
-        return entity.map(e -> modelMapper.map(e, FacturaCabeceraDto.class));
+        FacturaCabeceraEntity entity = facturaCabeceraRepository.findById(id)
+                .orElseThrow(() -> new ControllerRequestException("No existe la factura con ID " + id));
+        FacturaCabeceraDto dto = modelMapper.map(entity, FacturaCabeceraDto.class);
+        List<FacturaDetalleDto> detalles = entity.getFacturaDetalles().stream()
+                .map(det -> modelMapper.map(det, FacturaDetalleDto.class))
+                .collect(Collectors.toList());
+        dto.setFacturaDetalles(detalles);
+        return Optional.of(dto);
     }
-
-
 
         @Transactional(rollbackFor = Exception.class)
         public FacturaCabeceraDto save(FacturaCabeceraDto dto) {
@@ -123,7 +131,7 @@ public class FacturaCabeceraService implements IBaseService<FacturaCabeceraDto> 
                     totalIva10 += iva10;
 
 
-                    // Asignar la factura cabecera guardada al detalle
+                    // Asigno la cab al det
                     detalleEntity.setFactura(savedEntity);
                     det.add(detalleEntity);
 
@@ -134,7 +142,6 @@ public class FacturaCabeceraService implements IBaseService<FacturaCabeceraDto> 
                     facturaDetalleRepository.save(detalleEntity);
                 }
 
-                // Actualizar los valores totales y guardar la factura cabecera nuevamente
                 savedEntity.setTotal(total + totalIva5 + totalIva10);
                 savedEntity.setIva5(totalIva5);
                 savedEntity.setIva10(totalIva10);
@@ -187,44 +194,78 @@ public class FacturaCabeceraService implements IBaseService<FacturaCabeceraDto> 
 
     @Override
     public void delete(Long id) {
-        Optional<FacturaCabeceraEntity> entityOptional = facturaCabeceraRepository.findById(id);
-        if (entityOptional.isPresent()) {
-            FacturaCabeceraEntity entity = entityOptional.get();
-            entity.setDeleted(true);  // Asumimos un borrado lógico
-            facturaCabeceraRepository.save(entity);
-        }
     }
+
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public FacturaCabeceraDto update(Long id, FacturaCabeceraDto dto) {
-        Optional<FacturaCabeceraEntity> entityOptional = facturaCabeceraRepository.findById(id);
-        if (entityOptional.isPresent()) {
-            FacturaCabeceraEntity entity = entityOptional.get();
-            // Actualizar los campos necesarios
-            entity.setNumeroFactura(dto.getNumeroFactura());
-            entity.setTotal(dto.getTotal());
-            entity.setEsCompra(dto.getEsCompra());
-            entity.setIva5(dto.getIva5());
-            entity.setIva10(dto.getIva10());
-            entity.setCliente(modelMapper.map(dto.getClienteId(), ClienteEntity.class));
+        FacturaCabeceraEntity entity = facturaCabeceraRepository.findById(id)
+                .orElseThrow(() -> new ControllerRequestException("No existe la factura con ID " + id));
 
-            // Guardar los cambios
-            FacturaCabeceraEntity updatedEntity = facturaCabeceraRepository.save(entity);
-
-            // Lógica para imprimir si no es compra (es una venta)
-            if (!updatedEntity.getEsCompra()) {
-                imprimirFactura(updatedEntity);
-            }
-
-            // Convertir a DTO y retornar
-            return modelMapper.map(updatedEntity, FacturaCabeceraDto.class);
+        // Actualizar campos de la cabecera
+        entity.setEsCompra(dto.getEsCompra());
+        entity.setIva5(dto.getIva5());
+        entity.setIva10(dto.getIva10());
+        if (dto.getClienteId() != null) {
+            ClienteEntity cliente = clienteRepository.findById(dto.getClienteId())
+                    .orElseThrow(() -> new ControllerRequestException("No existe el cliente con ID " + dto.getClienteId()));
+            entity.setCliente(cliente);
         }
-        return null;
+
+        // Actualizar detalles
+        List<FacturaDetalleEntity> existingDetails = entity.getFacturaDetalles();
+        facturaDetalleRepository.deleteAll(existingDetails); // Eliminar los detalles existentes
+
+        List<FacturaDetalleEntity> updatedDetails = new ArrayList<>();
+        double total = 0.0;
+        double totalIva5 = 0.0;
+        double totalIva10 = 0.0;
+
+        for (FacturaDetalleDto detalleDto : dto.getFacturaDetalles()) {
+            ProductoEntity producto = productoRepository.findById(detalleDto.getProducto())
+                    .orElseThrow(() -> new ControllerRequestException("No existe el producto con ID " + detalleDto.getProducto()));
+
+            FacturaDetalleEntity detalleEntity = new FacturaDetalleEntity();
+            detalleEntity.setCantidad(detalleDto.getCantidad());
+            detalleEntity.setPrecioUnitario(entity.getEsCompra() ? producto.getPrecioCompra() : producto.getPrecioVenta());
+            detalleEntity.setIva5(producto.getIva5());
+            detalleEntity.setIva10(producto.getIva10());
+            detalleEntity.setProducto(producto);
+
+            double subtotal = detalleEntity.getCantidad() * detalleEntity.getPrecioUnitario();
+            double iva5 = (producto.getIva5() / 100) * subtotal;
+            double iva10 = (producto.getIva10() / 100) * subtotal;
+
+            detalleEntity.setSubtotal(subtotal);
+            detalleEntity.setIva5(iva5);
+            detalleEntity.setIva10(iva10);
+
+            total += subtotal;
+            totalIva5 += iva5;
+            totalIva10 += iva10;
+
+            detalleEntity.setFactura(entity);
+            updatedDetails.add(detalleEntity);
+
+            producto.setCantidad(entity.getEsCompra() ? producto.getCantidad() + detalleEntity.getCantidad() : producto.getCantidad() - detalleEntity.getCantidad());
+            productoRepository.save(producto);
+        }
+
+        entity.setFacturaDetalles(updatedDetails);
+        entity.setTotal(total + totalIva5 + totalIva10);
+        entity.setIva5(totalIva5);
+        entity.setIva10(totalIva10);
+
+        FacturaCabeceraEntity updatedEntity = facturaCabeceraRepository.save(entity);
+        List<FacturaDetalleDto> detalles = updatedEntity.getFacturaDetalles().stream()
+                .map(det -> modelMapper.map(det, FacturaDetalleDto.class))
+                .collect(Collectors.toList());
+
+        FacturaCabeceraDto updatedDto = modelMapper.map(updatedEntity, FacturaCabeceraDto.class);
+        updatedDto.setFacturaDetalles(detalles);
+        return updatedDto;
     }
-
-
-
 
     @Transactional(readOnly = true)
     public Page<FacturaCabeceraDto> findByClienteNombreOrNumeroFactura(Pageable pageable, String nombre, String numeroFactura) {
@@ -233,20 +274,4 @@ public class FacturaCabeceraService implements IBaseService<FacturaCabeceraDto> 
     }
 
 
-
-    private FacturaCabeceraDto convertToFacturaDto(FacturaCabeceraEntity entity) {
-        FacturaCabeceraDto dto = modelMapper.map(entity, FacturaCabeceraDto.class);
-        List<FacturaDetalleDto> detalleDtos = entity.getFacturaDetalles()
-                .stream()
-                .map(this::convertToFacturaDetalleDto)
-                .collect(Collectors.toList());
-
-        dto.setFacturaDetalles(detalleDtos);
-        return dto;
-    }
-
-
-    private FacturaDetalleDto convertToFacturaDetalleDto(FacturaDetalleEntity entity) {
-        return modelMapper.map(entity, FacturaDetalleDto.class);
-    }
 }

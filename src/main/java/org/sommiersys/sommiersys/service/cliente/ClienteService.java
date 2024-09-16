@@ -10,7 +10,10 @@ import org.sommiersys.sommiersys.common.interfaces.IBaseService;
 import org.pack.sommierJar.entity.cliente.ClienteEntity;
 import org.sommiersys.sommiersys.repository.cliente.ClienteRepository;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.CachePut;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -43,6 +46,15 @@ public class ClienteService implements IBaseService<ClienteDto> {
         try {
             Page<ClienteEntity> clienteEntities = clienteRepository.findAllByDeleted(false, pageable);
             Page<ClienteDto> result = clienteEntities.map(clienteEntity -> modelMapper.map(clienteEntity, ClienteDto.class));
+            result.forEach(cliente -> {
+                String key = "api_cliente_" + cliente.getId();
+                Cache cache = cacheManager.getCache(key);
+                Object clienteCacheado = cache.get(key, Object.class);
+
+                if(clienteCacheado == null){
+                    cache.put(key, (Object)cliente);
+                }
+            });
             return result;
         } catch (Exception e) {
             logger.error("Error al buscar los clientes", e);
@@ -73,6 +85,7 @@ public class ClienteService implements IBaseService<ClienteDto> {
 
     @Override
     @Transactional(readOnly = true, propagation = Propagation.SUPPORTS, rollbackFor = Exception.class)
+    @CacheEvict(value = "sd", key = "'api_cliente_' + #id")
     public void delete(Long id) {
         try {
             clienteRepository.delete(clienteRepository.findById(id).orElse(null));
@@ -84,6 +97,7 @@ public class ClienteService implements IBaseService<ClienteDto> {
 
     @Override
     @Transactional(readOnly = true, propagation = Propagation.SUPPORTS, rollbackFor = Exception.class)
+    @CachePut(cacheManager = "cacheManagerWithoutTTL", value = "sd", key = "'api_cliente_' + #id")
     public ClienteDto update(Long id, ClienteDto dto) {
         try {
             ClienteEntity cliente = clienteRepository.findById(id).orElseThrow(() -> new ControllerRequestException("No se ha encontrado ese cliente") );
@@ -107,7 +121,18 @@ public class ClienteService implements IBaseService<ClienteDto> {
 
         try {
             Page<ClienteEntity> clienteEntities = clienteRepository.findByNombreOrRuc(pageable, nombre, cedula);
-            return clienteEntities.map(clienteEntity -> modelMapper.map(clienteEntity, ClienteDto.class));
+            Page<ClienteDto> result = clienteEntities.map(clienteEntity -> modelMapper.map(clienteEntity, ClienteDto.class));
+            result.forEach(cliente -> {
+                String key = "api_cliente_" + cliente.getId();
+                Cache cache = cacheManager.getCache(key);
+                Object clienteCacheado = cache.get(key, Object.class);
+
+                if(clienteCacheado == null){
+                    cache.put(key, (Object)cliente);
+                }
+            });
+
+            return result;
         } catch (Exception e) {
             logger.error("Error al buscar el cliente", e);
             throw new ControllerRequestException("Cliente no encontrado", e);

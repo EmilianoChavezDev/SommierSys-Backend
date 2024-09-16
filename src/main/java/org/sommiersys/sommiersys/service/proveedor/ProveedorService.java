@@ -11,6 +11,11 @@ import org.sommiersys.sommiersys.common.interfaces.IBaseService;
 import org.sommiersys.sommiersys.repository.cliente.ClienteRepository;
 import org.sommiersys.sommiersys.repository.proveedor.ProveedorRepository;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.cache.Cache;
+import org.springframework.cache.CacheManager;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.CachePut;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -31,6 +36,9 @@ public class ProveedorService implements IBaseService<ProveedorDto> {
     @Autowired
     private ClienteRepository clienteRepository;
 
+    @Autowired
+    private CacheManager cacheManager;
+
 
     @Override
     @Transactional(readOnly = true, propagation = Propagation.SUPPORTS)
@@ -38,6 +46,16 @@ public class ProveedorService implements IBaseService<ProveedorDto> {
         try {
             Page<ProveedorEntity> entityPage = proveedorRepository.findAllByDeleted(false, pageable);
             Page<ProveedorDto> proveedorResult = entityPage.map(entity -> modelMapper.map(entity, ProveedorDto.class));
+            proveedorResult.forEach(cliente -> {
+                String key = "api_proveedor_" + cliente.getId();
+                Cache cache = cacheManager.getCache(key);
+                Object proveedorCacheado = cache.get(key, Object.class);
+
+                if(proveedorCacheado == null){
+                    cache.put(key, (Object)cliente);
+                }
+            });
+
             return proveedorResult;
         } catch (Exception e) {
             logger.error("Error al listar los proveedores", e);
@@ -46,6 +64,7 @@ public class ProveedorService implements IBaseService<ProveedorDto> {
     }
 
     @Override
+    @Cacheable(cacheManager = "cacheManagerWithoutTTL", value = "sd", key = "'api_proveedor_' + #id")
     @Transactional(readOnly = true, propagation = Propagation.SUPPORTS)
     public Optional<ProveedorDto> findById(Long id) {
         Optional<ProveedorEntity> entityOptional = proveedorRepository.findById(id);
@@ -68,6 +87,7 @@ public class ProveedorService implements IBaseService<ProveedorDto> {
 
     @Override
     @Transactional(readOnly = true, propagation = Propagation.SUPPORTS, rollbackFor = Exception.class)
+    @CacheEvict(value = "sd", key = "'api_proveedor_' + #id")
     public void delete(Long id) {
         try {
             clienteRepository.delete(clienteRepository.findById(id).orElse(null));
@@ -80,6 +100,7 @@ public class ProveedorService implements IBaseService<ProveedorDto> {
     @Override
 
     @Transactional(readOnly = true, propagation = Propagation.SUPPORTS, rollbackFor = Exception.class)
+    @CachePut(cacheManager = "cacheManagerWithoutTTL", value = "sd", key = "'api_proveedor_' + #id")
     public ProveedorDto update(Long id, ProveedorDto dto) {
         try {
             ProveedorEntity updatedEntity = proveedorRepository.findById(id).orElseThrow(() -> new ControllerRequestException("No se pudo encontrar al proveedor"));
@@ -100,6 +121,15 @@ public class ProveedorService implements IBaseService<ProveedorDto> {
         try {
             Page<ProveedorEntity> proveedorEntities = proveedorRepository.findByNombreOrRuc(pageable, ruc, nombre);
             Page<ProveedorDto> proveedorResult = proveedorEntities.map(entity -> modelMapper.map(entity, ProveedorDto.class));
+            proveedorResult.forEach(cliente -> {
+                String key = "api_proveedor_" + cliente.getId();
+                Cache cache = cacheManager.getCache(key);
+                Object proveedorCacheado = cache.get(key, Object.class);
+
+                if(proveedorCacheado == null){
+                    cache.put(key, (Object)cliente);
+                }
+            });
             return proveedorResult;
         } catch (Exception e) {
             logger.error("Error al buscar un proveedor", e);

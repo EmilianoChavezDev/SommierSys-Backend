@@ -9,6 +9,11 @@ import org.sommiersys.sommiersys.common.exception.ControllerRequestException;
 import org.sommiersys.sommiersys.repository.producto.ProductoRepository;
 import org.sommiersys.sommiersys.repository.proveedor.ProveedorRepository;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.cache.Cache;
+import org.springframework.cache.CacheManager;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.CachePut;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -28,18 +33,35 @@ public class ProductoService {
     @Autowired
     private ProveedorRepository proveedorRepository;
 
+    @Autowired
+    private CacheManager cacheManager;
+
     @Transactional(readOnly = true, propagation = Propagation.SUPPORTS)
     public Page<ProductoDto> findAll(Pageable pageable) {
         try {
             Page<ProductoEntity> entityPage = productoRepository.findAllByDeleted(false, pageable);
-            return entityPage.map(this::convertToDto);
+            Page<ProductoDto> result = entityPage.map(this::convertToDto);
+
+            result.forEach(productoDto -> {
+                String cacheKey = "api_producto_" + productoDto.getId();
+                Cache cache = cacheManager.getCache("productoCache"); // Nombre del caché que uses
+                Object productoCacheado = cache.get(cacheKey, Object.class);
+
+                if (productoCacheado == null) {
+                    cache.put(cacheKey, productoDto);
+                }
+            });
+
+            return result;
         } catch (Exception e) {
             logger.error("Error al listar los productos", e);
             throw new ControllerRequestException("Error al listar los productos", e);
         }
     }
 
+
     @Transactional(readOnly = true, propagation = Propagation.SUPPORTS)
+    @Cacheable(cacheManager = "cacheManagerWithoutTTL", value = "sd", key = "'api_producto_' + #id")
     public Optional<ProductoDto> findById(Long id) {
         try {
             return productoRepository.findById(id).map(this::convertToDto);
@@ -62,6 +84,7 @@ public class ProductoService {
     }
 
     @Transactional
+    @CacheEvict(value = "sd", key = "'api_producto_' + #id")
     public void delete(Long id) {
         try {
             productoRepository.deleteById(id);
@@ -72,6 +95,7 @@ public class ProductoService {
     }
 
     @Transactional
+    @CachePut(cacheManager = "cacheManagerWithoutTTL", value = "sd", key = "'api_producto_' + #id")
     public ProductoDto update(Long id, ProductoDto dto) {
         try {
             ProductoEntity existingEntity = productoRepository.findById(id)
@@ -86,51 +110,29 @@ public class ProductoService {
         }
     }
 
-    @Transactional
-    public void updateStock(Long productoId, Integer cantidad, boolean esCompra) {
-        try {
-            ProductoEntity producto = productoRepository.findById(productoId)
-                    .orElseThrow(() -> new ControllerRequestException("No existe el producto con ID " + productoId));
-
-            logger.info("Stock antes de la actualización: " + producto.getCantidad());
-
-            if (cantidad == null || cantidad < 0) {
-                throw new ControllerRequestException("Cantidad no válida para el producto con ID " + productoId);
-            }
-
-            // Ajustar el stock según si es una compra o una venta
-            if (esCompra) {
-                producto.setCantidad(producto.getCantidad() + cantidad);
-            } else {
-                if (producto.getCantidad() < cantidad) {
-                    throw new ControllerRequestException("No hay suficiente stock para el producto con ID " + productoId);
-                }
-                producto.setCantidad(producto.getCantidad() - cantidad);
-            }
-
-            productoRepository.save(producto);
-
-        } catch (ControllerRequestException e) {
-            logger.error("Error en la solicitud para actualizar el stock del producto con ID " + productoId + ": " + e.getMessage(), e);
-            throw e;
-        } catch (Exception e) {
-            logger.error("Error inesperado al actualizar el stock del producto con ID " + productoId, e);
-            throw new ControllerRequestException("Error al actualizar el stock del producto", e);
-        }
-    }
-
-
-
     @Transactional(readOnly = true, propagation = Propagation.SUPPORTS)
     public Page<ProductoDto> findByNombre(String nombre, Pageable pageable) {
         try {
             Page<ProductoEntity> entityPage = productoRepository.findByNombre(pageable, nombre);
-            return entityPage.map(this::convertToDto);
+            Page<ProductoDto> result = entityPage.map(this::convertToDto);
+
+            result.forEach(productoDto -> {
+                String cacheKey = "apli_producto_" + productoDto.getId();
+                Cache cache = cacheManager.getCache("productoCache"); // Nombre del caché que estás usando
+                Object productoCacheado = cache.get(cacheKey, Object.class);
+
+                if (productoCacheado == null) {
+                    cache.put(cacheKey, productoDto);
+                }
+            });
+
+            return result;
         } catch (Exception e) {
             logger.error("Error al buscar productos por nombre " + nombre, e);
             throw new ControllerRequestException("Error al buscar los productos", e);
         }
     }
+
 
     private ProductoDto convertToDto(ProductoEntity entity) {
         ProductoDto dto = new ProductoDto();
