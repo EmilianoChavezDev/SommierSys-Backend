@@ -6,7 +6,6 @@ import org.modelmapper.ModelMapper;
 import org.pack.sommierJar.dto.facturaCabecera.FacturaCabeceraDto;
 import org.pack.sommierJar.dto.facturaDetalle.FacturaDetalleDto;
 import org.pack.sommierJar.entity.cliente.ClienteEntity;
-import org.pack.sommierJar.entity.delivery.DeliveryEntity;
 import org.pack.sommierJar.entity.facturaCabecera.FacturaCabeceraEntity;
 import org.pack.sommierJar.entity.facturaDetalle.FacturaDetalleEntity;
 import org.pack.sommierJar.entity.producto.ProductoEntity;
@@ -18,8 +17,7 @@ import org.sommiersys.sommiersys.repository.cliente.ClienteRepository;
 import org.sommiersys.sommiersys.repository.facturaCabecera.FacturaCabeceraRepository;
 import org.sommiersys.sommiersys.repository.facturaDetalle.FacturaDetalleRepository;
 import org.sommiersys.sommiersys.repository.producto.ProductoRepository;
-import org.sommiersys.sommiersys.service.facturaDetalle.FacturaDetalleService;
-import org.sommiersys.sommiersys.service.producto.ProductoService;
+
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.cache.annotation.CachePut;
 import org.springframework.data.domain.Page;
