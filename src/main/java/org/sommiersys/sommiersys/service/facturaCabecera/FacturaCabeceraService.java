@@ -19,8 +19,11 @@ import org.sommiersys.sommiersys.repository.facturaDetalle.FacturaDetalleReposit
 import org.sommiersys.sommiersys.repository.producto.ProductoRepository;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.cache.Cache;
+import org.springframework.cache.CacheManager;
 import org.springframework.cache.annotation.CachePut;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -53,33 +56,114 @@ public class FacturaCabeceraService implements IBaseService<FacturaCabeceraDto> 
 
     ModelMapper modelMapper = new ModelMapper();
 
+    @Autowired
+    CacheManager cacheManager;
+
+
+
     @Override
     public Page<FacturaCabeceraDto> findAll(Pageable pageable) {
-        Page<FacturaCabeceraEntity> entities = facturaCabeceraRepository.findAll(pageable);
-        return entities.map(entity -> {
-            FacturaCabeceraDto dto = modelMapper.map(entity, FacturaCabeceraDto.class);
-            dto.setFacturaDetalles(entity.getFacturaDetalles()
+        try {
+            Page<FacturaCabeceraEntity> entities = facturaCabeceraRepository.findAll(pageable);
+
+            List<FacturaCabeceraDto> cabeceraDtos = entities
                     .stream()
-                    .map(det -> modelMapper.map(det, FacturaDetalleDto.class))
-                    .collect(Collectors.toList()));
-            return dto;
-        });
+                    .map(entity -> {
+                        FacturaCabeceraDto dto = new FacturaCabeceraDto();
+                        dto.setId(entity.getId());
+                        dto.setFecha(entity.getFecha());
+                        dto.setTotal(entity.getTotal());
+                        dto.setIva5(entity.getIva5());
+                        dto.setIva10(entity.getIva10());
+                        dto.setEsCompra(entity.getEsCompra());
+                        dto.setClienteId(entity.getCliente().getId());
+                        dto.setNumeroFactura(entity.getNumeroFactura());
+
+                        List<FacturaDetalleDto> detalles = entity.getFacturaDetalles()
+                                .stream()
+                                .map(det -> {
+                                    FacturaDetalleDto detDto = new FacturaDetalleDto();
+                                    detDto.setId(det.getId());
+                                    detDto.setSubtotal(det.getSubtotal());
+                                    detDto.setProducto(det.getProducto().getId());
+                                    detDto.setCantidad(det.getCantidad());
+                                    detDto.setIva5(det.getIva5());
+                                    detDto.setIva10(det.getIva10());
+                                    detDto.setPrecioUnitario(det.getPrecioUnitario());
+                                    return detDto;
+                                })
+                                .collect(Collectors.toList());
+
+                        dto.setFacturaDetalles(detalles);
+
+                        // Cacheando cada factura individualmente
+                        String key = "api_factura_" + dto.getId();
+                        Cache cache = cacheManager.getCache("facturasCache");
+                        if (cache != null) {
+                            FacturaCabeceraDto cachedFactura = cache.get(key, FacturaCabeceraDto.class);
+                            if (cachedFactura == null) {
+                                cache.put(key, dto);
+                            }
+                        }
+
+                        return dto;
+                    })
+                    .collect(Collectors.toList());
+
+            return new PageImpl<>(cabeceraDtos, pageable, entities.getTotalElements());
+        } catch (Exception e) {
+            logger.error("Error al listar las facturas", e);
+            throw new ControllerRequestException("Error al listar las facturas", e);
+        }
     }
 
+
+
+    @Override
     @CachePut(cacheManager = "cacheManagerWithoutTTL", value = "sd", key = "'api_facturas_' + #id")
     @Transactional(readOnly = true)
     public Optional<FacturaCabeceraDto> findById(Long id) {
-        FacturaCabeceraEntity entity = facturaCabeceraRepository.findById(id)
-                .orElseThrow(() -> new ControllerRequestException("No existe la factura con ID " + id));
-        FacturaCabeceraDto dto = modelMapper.map(entity, FacturaCabeceraDto.class);
-        List<FacturaDetalleDto> detalles = entity.getFacturaDetalles().stream()
-                .map(det -> modelMapper.map(det, FacturaDetalleDto.class))
-                .collect(Collectors.toList());
-        dto.setFacturaDetalles(detalles);
-        return Optional.of(dto);
+        try {
+            FacturaCabeceraEntity entity = facturaCabeceraRepository.findById(id)
+                    .orElseThrow(() -> new ControllerRequestException("No existe la factura con ID " + id));
+
+            FacturaCabeceraDto dto = new FacturaCabeceraDto();
+            dto.setId(entity.getId());
+            dto.setFecha(entity.getFecha());
+            dto.setTotal(entity.getTotal());
+            dto.setIva5(entity.getIva5());
+            dto.setIva10(entity.getIva10());
+            dto.setEsCompra(entity.getEsCompra());
+            dto.setClienteId(entity.getCliente().getId());
+            dto.setNumeroFactura(entity.getNumeroFactura());
+
+
+            List<FacturaDetalleDto> detalles = entity.getFacturaDetalles()
+                    .stream()
+                    .map(det -> {
+                        FacturaDetalleDto detDto = new FacturaDetalleDto();
+                        detDto.setId(det.getId());
+                        detDto.setSubtotal(det.getSubtotal());
+                        detDto.setProducto(det.getProducto().getId());
+                        detDto.setCantidad(det.getCantidad());
+                        detDto.setIva5(det.getIva5());
+                        detDto.setIva10(det.getIva10());
+                        detDto.setPrecioUnitario(det.getPrecioUnitario());
+                        return detDto;
+                    })
+                    .collect(Collectors.toList());
+
+            dto.setFacturaDetalles(detalles);
+
+            return Optional.of(dto);
+        } catch (Exception e) {
+            logger.error("Error al intentar obtener la factura por ID: " + id, e);
+            throw new ControllerRequestException("Error al obtener la factura con ID " + id, e);
+        }
     }
 
-        @Transactional(rollbackFor = Exception.class)
+
+    @Transactional(rollbackFor = Exception.class)
         public FacturaCabeceraDto save(FacturaCabeceraDto dto) {
             try {
                 FacturaCabeceraEntity entity = new FacturaCabeceraEntity();
