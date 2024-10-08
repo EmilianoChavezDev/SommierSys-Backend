@@ -100,16 +100,26 @@ public class ClienteService implements IBaseService<ClienteDto> {
     @CachePut(cacheManager = "cacheManagerWithoutTTL", value = "sd", key = "'api_cliente_' + #id")
     public ClienteDto update(Long id, ClienteDto dto) {
         try {
-            ClienteEntity cliente = clienteRepository.findById(id).orElseThrow(() -> new ControllerRequestException("No se ha encontrado ese cliente") );
-            ClienteEntity clienteEntity = modelMapper.map(dto, ClienteEntity.class);
-            clienteEntity.setId(cliente.getId());
-            clienteRepository.save(clienteEntity);
-            return modelMapper.map(clienteEntity, ClienteDto.class);
+            // Busca el cliente existente
+            ClienteEntity cliente = clienteRepository.findById(id)
+                    .orElseThrow(() -> new ControllerRequestException("No se ha encontrado ese cliente"));
+
+            // Actualiza solo los campos necesarios del cliente existente
+            cliente.setNombre(dto.getNombre());
+            cliente.setDireccion(dto.getDireccion());
+            cliente.setTelefono(dto.getTelefono());
+            cliente.setCedula(dto.getCedula());
+            cliente.setEmail(dto.getEmail());
+
+            // Guarda el cliente actualizado
+            clienteRepository.save(cliente);
+            return modelMapper.map(cliente, ClienteDto.class);
         } catch (Exception e) {
             logger.error("Error al actualizar el cliente", e);
             throw new ControllerRequestException("Error al actualizar el cliente", e);
         }
     }
+
 
 
     @Transactional(readOnly = true, propagation = Propagation.SUPPORTS, rollbackFor = Exception.class)

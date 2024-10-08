@@ -100,8 +100,7 @@
         <!-- https://mvnrepository.com/artifact/org.apache.pdfbox/pdfbox-io -->
         <dependency>
             <groupId>org.apache.pdfbox</groupId>
-            <artifactId>pdfbox-io</artifactId>
-            <version>3.0.0</version>
+            <artifactId>pdfbox</artifactId>
         </dependency>
 
         <!-- pdfbox -->

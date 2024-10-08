@@ -1,6 +1,7 @@
 package org.sommiersys.sommiersys.service.facturaCabecera;
 
 
+import org.apache.pdfbox.pdmodel.PDDocument;
 import org.modelmapper.ModelMapper;
 
 import org.pack.sommierJar.dto.facturaCabecera.FacturaCabeceraDto;
@@ -13,11 +14,14 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.sommiersys.sommiersys.common.exception.ControllerRequestException;
 import org.sommiersys.sommiersys.common.interfaces.IBaseService;
+import org.sommiersys.sommiersys.configuration.MapperFactura;
 import org.sommiersys.sommiersys.repository.cliente.ClienteRepository;
 import org.sommiersys.sommiersys.repository.facturaCabecera.FacturaCabeceraRepository;
 import org.sommiersys.sommiersys.repository.facturaDetalle.FacturaDetalleRepository;
 import org.sommiersys.sommiersys.repository.producto.ProductoRepository;
 
+import org.sommiersys.sommiersys.service.email.EmailService;
+import org.sommiersys.sommiersys.utils.FacturaPDF;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
@@ -26,8 +30,10 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.io.ByteArrayOutputStream;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -56,58 +62,24 @@ public class FacturaCabeceraService implements IBaseService<FacturaCabeceraDto> 
 
     ModelMapper modelMapper = new ModelMapper();
 
+
     @Autowired
     CacheManager cacheManager;
 
 
+    @Autowired
+    private EmailService emailService;
+
 
     @Override
+    @Transactional
     public Page<FacturaCabeceraDto> findAll(Pageable pageable) {
         try {
-            Page<FacturaCabeceraEntity> entities = facturaCabeceraRepository.findAll(pageable);
+            Page<FacturaCabeceraEntity> entities = facturaCabeceraRepository.findAllByDeleted(false, pageable);
 
             List<FacturaCabeceraDto> cabeceraDtos = entities
                     .stream()
-                    .map(entity -> {
-                        FacturaCabeceraDto dto = new FacturaCabeceraDto();
-                        dto.setId(entity.getId());
-                        dto.setFecha(entity.getFecha());
-                        dto.setTotal(entity.getTotal());
-                        dto.setIva5(entity.getIva5());
-                        dto.setIva10(entity.getIva10());
-                        dto.setEsCompra(entity.getEsCompra());
-                        dto.setClienteId(entity.getCliente().getId());
-                        dto.setNumeroFactura(entity.getNumeroFactura());
-
-                        List<FacturaDetalleDto> detalles = entity.getFacturaDetalles()
-                                .stream()
-                                .map(det -> {
-                                    FacturaDetalleDto detDto = new FacturaDetalleDto();
-                                    detDto.setId(det.getId());
-                                    detDto.setSubtotal(det.getSubtotal());
-                                    detDto.setProducto(det.getProducto().getId());
-                                    detDto.setCantidad(det.getCantidad());
-                                    detDto.setIva5(det.getIva5());
-                                    detDto.setIva10(det.getIva10());
-                                    detDto.setPrecioUnitario(det.getPrecioUnitario());
-                                    return detDto;
-                                })
-                                .collect(Collectors.toList());
-
-                        dto.setFacturaDetalles(detalles);
-
-                        // Cacheando cada factura individualmente
-                        String key = "api_factura_" + dto.getId();
-                        Cache cache = cacheManager.getCache("facturasCache");
-                        if (cache != null) {
-                            FacturaCabeceraDto cachedFactura = cache.get(key, FacturaCabeceraDto.class);
-                            if (cachedFactura == null) {
-                                cache.put(key, dto);
-                            }
-                        }
-
-                        return dto;
-                    })
+                    .map(entity -> MapperFactura.toDto(entity, cacheManager))
                     .collect(Collectors.toList());
 
             return new PageImpl<>(cabeceraDtos, pageable, entities.getTotalElements());
@@ -127,33 +99,7 @@ public class FacturaCabeceraService implements IBaseService<FacturaCabeceraDto> 
             FacturaCabeceraEntity entity = facturaCabeceraRepository.findById(id)
                     .orElseThrow(() -> new ControllerRequestException("No existe la factura con ID " + id));
 
-            FacturaCabeceraDto dto = new FacturaCabeceraDto();
-            dto.setId(entity.getId());
-            dto.setFecha(entity.getFecha());
-            dto.setTotal(entity.getTotal());
-            dto.setIva5(entity.getIva5());
-            dto.setIva10(entity.getIva10());
-            dto.setEsCompra(entity.getEsCompra());
-            dto.setClienteId(entity.getCliente().getId());
-            dto.setNumeroFactura(entity.getNumeroFactura());
-
-
-            List<FacturaDetalleDto> detalles = entity.getFacturaDetalles()
-                    .stream()
-                    .map(det -> {
-                        FacturaDetalleDto detDto = new FacturaDetalleDto();
-                        detDto.setId(det.getId());
-                        detDto.setSubtotal(det.getSubtotal());
-                        detDto.setProducto(det.getProducto().getId());
-                        detDto.setCantidad(det.getCantidad());
-                        detDto.setIva5(det.getIva5());
-                        detDto.setIva10(det.getIva10());
-                        detDto.setPrecioUnitario(det.getPrecioUnitario());
-                        return detDto;
-                    })
-                    .collect(Collectors.toList());
-
-            dto.setFacturaDetalles(detalles);
+            FacturaCabeceraDto dto = MapperFactura.toDto(entity, cacheManager);
 
             return Optional.of(dto);
         } catch (Exception e) {
@@ -162,198 +108,274 @@ public class FacturaCabeceraService implements IBaseService<FacturaCabeceraDto> 
         }
     }
 
-
     @Transactional(rollbackFor = Exception.class)
-        public FacturaCabeceraDto save(FacturaCabeceraDto dto) {
-            try {
-                FacturaCabeceraEntity entity = new FacturaCabeceraEntity();
-                entity.setEsCompra(dto.getEsCompra());
-                entity.setIva5(dto.getIva5());
-                entity.setIva10(dto.getIva10());
-                entity.setFecha(LocalDate.from(LocalDateTime.now()));
-                entity.setNumeroFactura(entity.getEsCompra() ? "0" : generateFacturaNumber());
-
-                if (dto.getClienteId() != null) {
-                    ClienteEntity cliente = clienteRepository.findById(dto.getClienteId())
-                            .orElseThrow(() -> new ControllerRequestException("No existe el cliente con ID " + dto.getClienteId()));
-                    entity.setCliente(cliente);
-                }
-
-                FacturaCabeceraEntity savedEntity = facturaCabeceraRepository.save(entity);
-                List<FacturaDetalleEntity> det = new ArrayList<>();
-
-                double total = 0.0;
-                double totalIva5 = 0.0;
-                double totalIva10 = 0.0;
-
-                for (FacturaDetalleDto detalleDto : dto.getFacturaDetalles()) {
-                    ProductoEntity producto = productoRepository.findById(detalleDto.getProducto())
-                            .orElseThrow(() -> new ControllerRequestException("No existe el producto con ID " + detalleDto.getProducto()));
-
-                    // Calcular subtotal, IVA
-                    FacturaDetalleEntity detalleEntity = new FacturaDetalleEntity();
-                    detalleEntity.setCantidad(detalleDto.getCantidad());
-                    detalleEntity.setPrecioUnitario(entity.getEsCompra() ? producto.getPrecioCompra() : producto.getPrecioVenta());
-                    detalleEntity.setIva5(producto.getIva5());
-                    detalleEntity.setIva10(producto.getIva10());
-                    detalleEntity.setProducto(producto);
-
-                    // Calcular subtotal e IVA
-                    double subtotal = detalleEntity.getCantidad() * detalleEntity.getPrecioUnitario();
-                    double iva5 = (producto.getIva5() / 100) * subtotal;
-                    double iva10 = (producto.getIva10() / 100) * subtotal;
-
-                    detalleEntity.setSubtotal(subtotal);
-                    detalleEntity.setIva5(iva5);
-                    detalleEntity.setIva10(iva10);
-
-                    // Actualizar los totales
-                    total += subtotal;
-                    totalIva5 += iva5;
-                    totalIva10 += iva10;
+    public FacturaCabeceraDto save(FacturaCabeceraDto dto) {
+        try {
+            FacturaCabeceraEntity entity = new FacturaCabeceraEntity();
+            entity.setEsCompra(dto.getEsCompra());
+            entity.setIva5(dto.getIva5());
+            entity.setIva10(dto.getIva10());
+            entity.setFecha(LocalDate.from(LocalDateTime.now()));
+            entity.setNumeroFactura(entity.getEsCompra() ? "0" : generateFacturaNumber());
 
 
-                    // Asigno la cab al det
-                    detalleEntity.setFactura(savedEntity);
-                    det.add(detalleEntity);
-
-                    producto.setCantidad(savedEntity.getEsCompra() ?  producto.getCantidad() + detalleEntity.getCantidad() : producto.getCantidad() - detalleEntity.getCantidad());
-
-
-                    productoRepository.save(producto);
-                    facturaDetalleRepository.save(detalleEntity);
-                }
-
-                savedEntity.setTotal(total + totalIva5 + totalIva10);
-                savedEntity.setIva5(totalIva5);
-                savedEntity.setIva10(totalIva10);
-
-
-                savedEntity = facturaCabeceraRepository.save(savedEntity);
-
-                List<FacturaDetalleDto> detalles = new ArrayList<>();
-                for (FacturaDetalleEntity detalle : det) {
-                    FacturaDetalleDto detalleDto = new FacturaDetalleDto();
-                    detalleDto.setId(detalle.getId());
-                    detalleDto.setCantidad(detalle.getCantidad());
-                    detalleDto.setPrecioUnitario(detalle.getPrecioUnitario());
-                    detalleDto.setIva5(detalle.getIva5());
-                    detalleDto.setIva10(detalle.getIva10());
-                    detalleDto.setProducto(detalle.getProducto().getId());
-                    detalleDto.setSubtotal(detalle.getSubtotal());
-                    detalles.add(detalleDto);
-                }
-
-
-
-
-
-
-                FacturaCabeceraDto cabeDto = modelMapper.map(savedEntity, FacturaCabeceraDto.class);
-                cabeDto.setFacturaDetalles(detalles);
-                return cabeDto;
-            } catch (Exception e) {
-                  logger.error("Error al guardar la factura", e);
-                throw new ControllerRequestException("Error al guardar la factura", e);
+            if (dto.getClienteId() != null) {
+                ClienteEntity cliente = clienteRepository.findById(dto.getClienteId())
+                        .orElseThrow(() -> new ControllerRequestException("No existe el cliente con ID " + dto.getClienteId()));
+                entity.setCliente(cliente);
             }
+
+            FacturaCabeceraEntity savedEntity = facturaCabeceraRepository.save(entity);
+            List<FacturaDetalleEntity> det = new ArrayList<>();
+
+            double total = 0.0;
+            double totalIva5 = 0.0;
+            double totalIva10 = 0.0;
+
+            for (FacturaDetalleDto detalleDto : dto.getFacturaDetalles()) {
+                ProductoEntity producto = productoRepository.findById(detalleDto.getProducto())
+                        .orElseThrow(() -> new ControllerRequestException("No existe el producto con ID " + detalleDto.getProducto()));
+
+                // Calcular subtotal, IVA
+                FacturaDetalleEntity detalleEntity = new FacturaDetalleEntity();
+                detalleEntity.setCantidad(detalleDto.getCantidad());
+                detalleEntity.setPrecioUnitario(entity.getEsCompra() ? producto.getPrecioCompra() : producto.getPrecioVenta());
+                detalleEntity.setIva5(producto.getIva5());
+                detalleEntity.setIva10(producto.getIva10());
+                detalleEntity.setProducto(producto);
+
+                // Calcular subtotal e IVA
+                double subtotal = detalleEntity.getCantidad() * detalleEntity.getPrecioUnitario();
+                double iva5 = (producto.getIva5() / 100) * subtotal;
+                double iva10 = (producto.getIva10() / 100) * subtotal;
+
+                detalleEntity.setSubtotal(subtotal);
+                detalleEntity.setIva5(iva5);
+                detalleEntity.setIva10(iva10);
+
+                // Actualizar los totales
+                total += subtotal;
+                totalIva5 += iva5;
+                totalIva10 += iva10;
+
+                // Asigno la cabecera al detalle
+                detalleEntity.setFactura(savedEntity);
+                det.add(detalleEntity);
+
+                producto.setCantidad(savedEntity.getEsCompra() ?  producto.getCantidad() + detalleEntity.getCantidad() : producto.getCantidad() - detalleEntity.getCantidad());
+
+                productoRepository.save(producto);
+                facturaDetalleRepository.save(detalleEntity);
+            }
+
+            savedEntity.setTotal(total + totalIva5 + totalIva10);
+            savedEntity.setIva5(totalIva5);
+            savedEntity.setIva10(totalIva10);
+
+            savedEntity = facturaCabeceraRepository.save(savedEntity);
+
+            // Convertir los detalles a DTO
+            List<FacturaDetalleDto> detalles = new ArrayList<>();
+            for (FacturaDetalleEntity detalle : det) {
+                FacturaDetalleDto detalleDto = new FacturaDetalleDto();
+                detalleDto.setId(detalle.getId());
+                detalleDto.setCantidad(detalle.getCantidad());
+                detalleDto.setPrecioUnitario(detalle.getPrecioUnitario());
+                detalleDto.setIva5(detalle.getIva5());
+                detalleDto.setIva10(detalle.getIva10());
+                detalleDto.setProducto(detalle.getProducto().getId());
+                detalleDto.setSubtotal(detalle.getSubtotal());
+                detalles.add(detalleDto);
+            }
+
+            // Generar el PDF de la factura
+            FacturaPDF facturaPDF = new FacturaPDF();
+            PDDocument pdfDocument = facturaPDF.generarFactura(savedEntity);
+
+            // Convertir el PDF a un array de bytes
+            ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+            pdfDocument.save(outputStream);
+            byte[] pdfBytes = outputStream.toByteArray();
+
+            // Cerrar el documento PDF
+            pdfDocument.close();
+
+            // Enviar el correo con el PDF adjunto
+            String destinatario = savedEntity.getCliente().getEmail();  // Asegúrate de que el cliente tiene un email válido
+            String asunto = "Factura #" + savedEntity.getNumeroFactura();
+            String cuerpo = "Adjunto encontrarás la factura correspondiente.";
+            String nombreArchivoPDF = "Factura_" + savedEntity.getNumeroFactura() + ".pdf";
+
+            emailService.sendEmailWithPDFAttachment(destinatario, asunto, cuerpo, pdfBytes, nombreArchivoPDF);
+
+            // Devolver el DTO de la factura guardada
+            FacturaCabeceraDto cabeDto = modelMapper.map(savedEntity, FacturaCabeceraDto.class);
+            cabeDto.setFacturaDetalles(detalles);
+            return cabeDto;
+        } catch (Exception e) {
+            logger.error("Error al guardar la factura", e);
+            throw new ControllerRequestException("Error al guardar la factura", e);
         }
-
-
-
-    private void imprimirFactura(FacturaCabeceraEntity entity) {
-
     }
 
 
 
 
-    private String generateFacturaNumber() {
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void delete(Long id) {
+        try {
+            FacturaCabeceraEntity factura = facturaCabeceraRepository.findById(id)
+                    .orElseThrow(() -> new ControllerRequestException("No existe la factura con ID " + id));
+
+            factura.setDeleted(true);
+
+            factura.getFacturaDetalles().forEach(detalle -> {
+                detalle.setDeleted(true);
+                facturaDetalleRepository.save(detalle);
+            });
+
+            facturaCabeceraRepository.save(factura);
+
+            FacturaCabeceraDto facturaDto = MapperFactura.toDtoDelete(factura);
+
+        } catch (Exception e) {
+            logger.error("Error al eliminar la factura con ID: " + id, e);
+            throw new ControllerRequestException("Error al eliminar la factura con ID: " + id, e);
+        }
+    }
+
+
+
+    @Override
+    @Transactional(propagation = Propagation.REQUIRED, rollbackFor = Exception.class)
+    public FacturaCabeceraDto update(Long id, FacturaCabeceraDto dto) {
+        try {
+            // Obtener la factura existente
+            FacturaCabeceraEntity entity = facturaCabeceraRepository.findById(id)
+                    .orElseThrow(() -> new ControllerRequestException("No existe la factura con ID " + id));
+
+            // Actualizar campos de la cabecera
+            entity.setEsCompra(dto.getEsCompra());
+            entity.setIva5(dto.getIva5());
+            entity.setIva10(dto.getIva10());
+            if (dto.getClienteId() != null) {
+                ClienteEntity cliente = clienteRepository.findById(dto.getClienteId())
+                        .orElseThrow(() -> new ControllerRequestException("No existe el cliente con ID " + dto.getClienteId()));
+                entity.setCliente(cliente);
+            }
+
+            // Validar y preparar los detalles de la factura antes de actualizar
+            List<FacturaDetalleEntity> updatedDetails = new ArrayList<>();
+            double total = 0.0;
+            double totalIva5 = 0.0;
+            double totalIva10 = 0.0;
+
+            for (FacturaDetalleDto detalleDto : dto.getFacturaDetalles()) {
+
+                // Buscar el producto en la base de datos
+                ProductoEntity producto = productoRepository.findById(detalleDto.getProducto())
+                        .orElseThrow(() -> new ControllerRequestException("No existe el producto con ID " + detalleDto.getProducto()));
+
+                // Preparar el detalle con los datos actualizados
+                FacturaDetalleEntity detalleEntity = new FacturaDetalleEntity();
+                detalleEntity.setCantidad(detalleDto.getCantidad());
+                detalleEntity.setPrecioUnitario(entity.getEsCompra() ? producto.getPrecioCompra() : producto.getPrecioVenta());
+                detalleEntity.setIva5(producto.getIva5());
+                detalleEntity.setIva10(producto.getIva10());
+                detalleEntity.setProducto(producto);
+
+                // Calcular subtotal e IVA
+                double subtotal = detalleEntity.getCantidad() * detalleEntity.getPrecioUnitario();
+                double iva5 = (producto.getIva5() / 100) * subtotal;
+                double iva10 = (producto.getIva10() / 100) * subtotal;
+
+                detalleEntity.setSubtotal(subtotal);
+                detalleEntity.setIva5(iva5);
+                detalleEntity.setIva10(iva10);
+
+                // Sumar los totales
+                total += subtotal;
+                totalIva5 += iva5;
+                totalIva10 += iva10;
+
+                // Agregar el detalle a la lista de actualizaciones
+                updatedDetails.add(detalleEntity);
+
+                // Actualizar la cantidad del producto
+                producto.setCantidad(entity.getEsCompra() ? producto.getCantidad() + detalleEntity.getCantidad() : producto.getCantidad() - detalleEntity.getCantidad());
+                productoRepository.save(producto);
+            }
+
+            // Actualizar la factura cabecera
+            entity.setFacturaDetalles(updatedDetails);
+            entity.setTotal(total + totalIva5 + totalIva10);
+            entity.setIva5(totalIva5);
+            entity.setIva10(totalIva10);
+
+            // Guardar los cambios en la base de datos
+            FacturaCabeceraEntity updatedEntity = facturaCabeceraRepository.save(entity);
+
+            // Mapear los detalles actualizados manualmente
+            List<FacturaDetalleDto> detalles = new ArrayList<>();
+            for (FacturaDetalleEntity detalle : updatedEntity.getFacturaDetalles()) {
+                FacturaDetalleDto detalleDto = new FacturaDetalleDto();
+                detalleDto.setId(detalle.getId());
+                detalleDto.setCantidad(detalle.getCantidad());
+                detalleDto.setPrecioUnitario(detalle.getPrecioUnitario());
+                detalleDto.setIva5(detalle.getIva5());
+                detalleDto.setIva10(detalle.getIva10());
+                detalleDto.setProducto(detalle.getProducto().getId());
+                detalleDto.setSubtotal(detalle.getSubtotal());
+                detalles.add(detalleDto);
+            }
+
+            // Mapear manualmente la cabecera
+            FacturaCabeceraDto updatedDto = new FacturaCabeceraDto();
+            updatedDto.setId(updatedEntity.getId());
+            updatedDto.setNumeroFactura(updatedEntity.getNumeroFactura());
+            updatedDto.setTotal(updatedEntity.getTotal());
+            updatedDto.setFecha(updatedEntity.getFecha());
+            updatedDto.setIva5(updatedEntity.getIva5());
+            updatedDto.setIva10(updatedEntity.getIva10());
+            updatedDto.setEsCompra(updatedEntity.getEsCompra());
+            updatedDto.setClienteId(updatedEntity.getCliente().getId());
+            updatedDto.setFacturaDetalles(detalles);
+
+            return updatedDto;
+        } catch (Exception e) {
+            logger.error("Error al actualizar la factura", e);
+            throw new ControllerRequestException("Error al actualizar la factura", e);
+        }
+    }
+
+
+
+
+    @Transactional(readOnly = true)
+    public Page<FacturaCabeceraDto> findByClienteNombreOrNumeroFactura(Pageable pageable, String nombre, String numeroFactura) {
+        try {
+            Page<FacturaCabeceraEntity> facturaEntities = facturaCabeceraRepository.findByClienteNombreOrNumeroFactura(pageable, nombre, numeroFactura, false);
+
+            List<FacturaCabeceraDto> cabeceraDtos = facturaEntities
+                    .stream()
+                    .map(entity -> MapperFactura.toDto(entity, cacheManager))
+                    .collect(Collectors.toList());
+
+            return new PageImpl<>(cabeceraDtos, pageable, facturaEntities.getTotalElements());
+        } catch (Exception e) {
+            logger.error("Error al buscar facturas por nombre de cliente o número de factura", e);
+            throw new ControllerRequestException("Error al buscar facturas", e);
+        }
+    }
+
+
+
+    public String generateFacturaNumber() {
         String prefix = "FAC-";
         long count = facturaCabeceraRepository.count() + 1; // Obtén el número total de facturas y suma 1
         return prefix + String.format("%06d", count); // Genera un número con ceros a la izquierda
     }
-
-
-    @Override
-    public void delete(Long id) {
-    }
-
-
-    @Override
-    @Transactional(rollbackFor = Exception.class)
-    public FacturaCabeceraDto update(Long id, FacturaCabeceraDto dto) {
-        FacturaCabeceraEntity entity = facturaCabeceraRepository.findById(id)
-                .orElseThrow(() -> new ControllerRequestException("No existe la factura con ID " + id));
-
-        // Actualizar campos de la cabecera
-        entity.setEsCompra(dto.getEsCompra());
-        entity.setIva5(dto.getIva5());
-        entity.setIva10(dto.getIva10());
-        if (dto.getClienteId() != null) {
-            ClienteEntity cliente = clienteRepository.findById(dto.getClienteId())
-                    .orElseThrow(() -> new ControllerRequestException("No existe el cliente con ID " + dto.getClienteId()));
-            entity.setCliente(cliente);
-        }
-
-        // Actualizar detalles
-        List<FacturaDetalleEntity> existingDetails = entity.getFacturaDetalles();
-        facturaDetalleRepository.deleteAll(existingDetails); // Eliminar los detalles existentes
-
-        List<FacturaDetalleEntity> updatedDetails = new ArrayList<>();
-        double total = 0.0;
-        double totalIva5 = 0.0;
-        double totalIva10 = 0.0;
-
-        for (FacturaDetalleDto detalleDto : dto.getFacturaDetalles()) {
-            ProductoEntity producto = productoRepository.findById(detalleDto.getProducto())
-                    .orElseThrow(() -> new ControllerRequestException("No existe el producto con ID " + detalleDto.getProducto()));
-
-            FacturaDetalleEntity detalleEntity = new FacturaDetalleEntity();
-            detalleEntity.setCantidad(detalleDto.getCantidad());
-            detalleEntity.setPrecioUnitario(entity.getEsCompra() ? producto.getPrecioCompra() : producto.getPrecioVenta());
-            detalleEntity.setIva5(producto.getIva5());
-            detalleEntity.setIva10(producto.getIva10());
-            detalleEntity.setProducto(producto);
-
-            double subtotal = detalleEntity.getCantidad() * detalleEntity.getPrecioUnitario();
-            double iva5 = (producto.getIva5() / 100) * subtotal;
-            double iva10 = (producto.getIva10() / 100) * subtotal;
-
-            detalleEntity.setSubtotal(subtotal);
-            detalleEntity.setIva5(iva5);
-            detalleEntity.setIva10(iva10);
-
-            total += subtotal;
-            totalIva5 += iva5;
-            totalIva10 += iva10;
-
-            detalleEntity.setFactura(entity);
-            updatedDetails.add(detalleEntity);
-
-            producto.setCantidad(entity.getEsCompra() ? producto.getCantidad() + detalleEntity.getCantidad() : producto.getCantidad() - detalleEntity.getCantidad());
-            productoRepository.save(producto);
-        }
-
-        entity.setFacturaDetalles(updatedDetails);
-        entity.setTotal(total + totalIva5 + totalIva10);
-        entity.setIva5(totalIva5);
-        entity.setIva10(totalIva10);
-
-        FacturaCabeceraEntity updatedEntity = facturaCabeceraRepository.save(entity);
-        List<FacturaDetalleDto> detalles = updatedEntity.getFacturaDetalles().stream()
-                .map(det -> modelMapper.map(det, FacturaDetalleDto.class))
-                .collect(Collectors.toList());
-
-        FacturaCabeceraDto updatedDto = modelMapper.map(updatedEntity, FacturaCabeceraDto.class);
-        updatedDto.setFacturaDetalles(detalles);
-        return updatedDto;
-    }
-
-    @Transactional(readOnly = true)
-    public Page<FacturaCabeceraDto> findByClienteNombreOrNumeroFactura(Pageable pageable, String nombre, String numeroFactura) {
-        Page<FacturaCabeceraEntity> facturaEntities = facturaCabeceraRepository.findByClienteNombreOrNumeroFactura(pageable, nombre, numeroFactura);
-        return facturaEntities.map(facturaEntity -> modelMapper.map(facturaEntity, FacturaCabeceraDto.class));
-    }
-
 
 }
