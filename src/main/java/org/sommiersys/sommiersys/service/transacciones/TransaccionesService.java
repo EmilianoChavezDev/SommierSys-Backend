@@ -1,6 +1,8 @@
+/*
 package org.sommiersys.sommiersys.service.transacciones;
 
 
+import org.hibernate.service.spi.ServiceException;
 import org.modelmapper.ModelMapper;
 import org.pack.sommierJar.dto.cliente.ClienteDto;
 import org.pack.sommierJar.dto.facturaCabecera.FacturaCabeceraDto;
@@ -11,7 +13,7 @@ import org.pack.sommierJar.entity.facturaDetalle.FacturaDetalleEntity;
 import org.pack.sommierJar.entity.producto.ProductoEntity;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.sommiersys.sommiersys.common.exception.ControllerRequestException;
+
 import org.sommiersys.sommiersys.repository.cliente.ClienteRepository;
 import org.sommiersys.sommiersys.repository.facturaCabecera.FacturaCabeceraRepository;
 import org.sommiersys.sommiersys.repository.facturaDetalle.FacturaDetalleRepository;
@@ -68,7 +70,7 @@ public class TransaccionesService {
         try {
             // Busca el cliente existente
             ClienteEntity cliente = clienteRepository.findById(id)
-                    .orElseThrow(() -> new ControllerRequestException("No se ha encontrado ese cliente"));
+                    .orElseThrow(() -> new ServiceException("No se ha encontrado ese cliente"));
 
             // Actualiza solo los campos necesarios del cliente existente
             cliente.setNombre(dto.getNombre());
@@ -439,3 +441,4 @@ public class TransaccionesService {
     }
 
 }
+*/

@@ -1,9 +1,10 @@
 package org.sommiersys.sommiersys.service.facturaCabecera;
 
 
+import jakarta.ws.rs.NotFoundException;
 import org.apache.pdfbox.pdmodel.PDDocument;
+import org.hibernate.service.spi.ServiceException;
 import org.modelmapper.ModelMapper;
-
 import org.pack.sommierJar.dto.facturaCabecera.FacturaCabeceraDto;
 import org.pack.sommierJar.dto.facturaDetalle.FacturaDetalleDto;
 import org.pack.sommierJar.entity.cliente.ClienteEntity;
@@ -12,18 +13,15 @@ import org.pack.sommierJar.entity.facturaDetalle.FacturaDetalleEntity;
 import org.pack.sommierJar.entity.producto.ProductoEntity;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.sommiersys.sommiersys.common.exception.ControllerRequestException;
 import org.sommiersys.sommiersys.common.interfaces.IBaseService;
 import org.sommiersys.sommiersys.configuration.MapperFactura;
 import org.sommiersys.sommiersys.repository.cliente.ClienteRepository;
 import org.sommiersys.sommiersys.repository.facturaCabecera.FacturaCabeceraRepository;
 import org.sommiersys.sommiersys.repository.facturaDetalle.FacturaDetalleRepository;
 import org.sommiersys.sommiersys.repository.producto.ProductoRepository;
-
 import org.sommiersys.sommiersys.service.email.EmailService;
 import org.sommiersys.sommiersys.utils.FacturaPDF;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
 import org.springframework.cache.annotation.CachePut;
 import org.springframework.data.domain.Page;
@@ -84,11 +82,10 @@ public class FacturaCabeceraService implements IBaseService<FacturaCabeceraDto> 
 
             return new PageImpl<>(cabeceraDtos, pageable, entities.getTotalElements());
         } catch (Exception e) {
-            logger.error("Error al listar las facturas", e);
-            throw new ControllerRequestException("Error al listar las facturas", e);
+            logger.error("Rollback triggered - Error al buscar las facturas: {}", e.getMessage());
+            throw new ServiceException("Error al buscar las facturas");
         }
     }
-
 
 
     @Override
@@ -97,14 +94,17 @@ public class FacturaCabeceraService implements IBaseService<FacturaCabeceraDto> 
     public Optional<FacturaCabeceraDto> findById(Long id) {
         try {
             FacturaCabeceraEntity entity = facturaCabeceraRepository.findById(id)
-                    .orElseThrow(() -> new ControllerRequestException("No existe la factura con ID " + id));
+                    .orElseThrow(() -> new ServiceException("No existe la factura con ID " + id));
 
             FacturaCabeceraDto dto = MapperFactura.toDto(entity, cacheManager);
 
             return Optional.of(dto);
+        } catch (NotFoundException e) {
+            logger.error("Rollback triggered - Factura no encontrada, id={}", id);
+            throw e;
         } catch (Exception e) {
-            logger.error("Error al intentar obtener la factura por ID: " + id, e);
-            throw new ControllerRequestException("Error al obtener la factura con ID " + id, e);
+            logger.error("Rollback triggered - Error al actualizar la factura: {}, Parameters: id={}", e.getMessage(), id);
+            throw new ServiceException("Error al actualizar la factura");
         }
     }
 
@@ -121,7 +121,7 @@ public class FacturaCabeceraService implements IBaseService<FacturaCabeceraDto> 
 
             if (dto.getClienteId() != null) {
                 ClienteEntity cliente = clienteRepository.findById(dto.getClienteId())
-                        .orElseThrow(() -> new ControllerRequestException("No existe el cliente con ID " + dto.getClienteId()));
+                        .orElseThrow(() -> new ServiceException("No existe el cliente con ID " + dto.getClienteId()));
                 entity.setCliente(cliente);
             }
 
@@ -134,7 +134,7 @@ public class FacturaCabeceraService implements IBaseService<FacturaCabeceraDto> 
 
             for (FacturaDetalleDto detalleDto : dto.getFacturaDetalles()) {
                 ProductoEntity producto = productoRepository.findById(detalleDto.getProducto())
-                        .orElseThrow(() -> new ControllerRequestException("No existe el producto con ID " + detalleDto.getProducto()));
+                        .orElseThrow(() -> new ServiceException("No existe el producto con ID " + detalleDto.getProducto()));
 
                 // Calcular subtotal, IVA
                 FacturaDetalleEntity detalleEntity = new FacturaDetalleEntity();
@@ -162,7 +162,7 @@ public class FacturaCabeceraService implements IBaseService<FacturaCabeceraDto> 
                 detalleEntity.setFactura(savedEntity);
                 det.add(detalleEntity);
 
-                producto.setCantidad(savedEntity.getEsCompra() ?  producto.getCantidad() + detalleEntity.getCantidad() : producto.getCantidad() - detalleEntity.getCantidad());
+                producto.setCantidad(savedEntity.getEsCompra() ? producto.getCantidad() + detalleEntity.getCantidad() : producto.getCantidad() - detalleEntity.getCantidad());
 
                 productoRepository.save(producto);
                 facturaDetalleRepository.save(detalleEntity);
@@ -213,13 +213,10 @@ public class FacturaCabeceraService implements IBaseService<FacturaCabeceraDto> 
             cabeDto.setFacturaDetalles(detalles);
             return cabeDto;
         } catch (Exception e) {
-            logger.error("Error al guardar la factura", e);
-            throw new ControllerRequestException("Error al guardar la factura", e);
+            logger.error("Rollback triggered - Error al guardar la factura: {}", e.getMessage());
+            throw new ServiceException("Error al guardar la factura");
         }
     }
-
-
-
 
 
     @Override
@@ -227,7 +224,7 @@ public class FacturaCabeceraService implements IBaseService<FacturaCabeceraDto> 
     public void delete(Long id) {
         try {
             FacturaCabeceraEntity factura = facturaCabeceraRepository.findById(id)
-                    .orElseThrow(() -> new ControllerRequestException("No existe la factura con ID " + id));
+                    .orElseThrow(() -> new ServiceException("No existe la factura con ID " + id));
 
             factura.setDeleted(true);
 
@@ -240,12 +237,14 @@ public class FacturaCabeceraService implements IBaseService<FacturaCabeceraDto> 
 
             FacturaCabeceraDto facturaDto = MapperFactura.toDtoDelete(factura);
 
+        } catch (NotFoundException e) {
+            logger.error("Rollback triggered - Cliente no encontrado, id={}", id);
+            throw e;
         } catch (Exception e) {
-            logger.error("Error al eliminar la factura con ID: " + id, e);
-            throw new ControllerRequestException("Error al eliminar la factura con ID: " + id, e);
+            logger.error("Rollback triggered - Error al actualizar el cliente: {}, Parameters: id={}", e.getMessage(), id);
+            throw new ServiceException("Error al actualizar el cliente");
         }
     }
-
 
 
     @Override
@@ -254,7 +253,7 @@ public class FacturaCabeceraService implements IBaseService<FacturaCabeceraDto> 
         try {
             // Obtener la factura existente
             FacturaCabeceraEntity entity = facturaCabeceraRepository.findById(id)
-                    .orElseThrow(() -> new ControllerRequestException("No existe la factura con ID " + id));
+                    .orElseThrow(() -> new ServiceException("No existe la factura con ID " + id));
 
             // Actualizar campos de la cabecera
             entity.setEsCompra(dto.getEsCompra());
@@ -262,7 +261,7 @@ public class FacturaCabeceraService implements IBaseService<FacturaCabeceraDto> 
             entity.setIva10(dto.getIva10());
             if (dto.getClienteId() != null) {
                 ClienteEntity cliente = clienteRepository.findById(dto.getClienteId())
-                        .orElseThrow(() -> new ControllerRequestException("No existe el cliente con ID " + dto.getClienteId()));
+                        .orElseThrow(() -> new ServiceException("No existe el cliente con ID " + dto.getClienteId()));
                 entity.setCliente(cliente);
             }
 
@@ -276,7 +275,7 @@ public class FacturaCabeceraService implements IBaseService<FacturaCabeceraDto> 
 
                 // Buscar el producto en la base de datos
                 ProductoEntity producto = productoRepository.findById(detalleDto.getProducto())
-                        .orElseThrow(() -> new ControllerRequestException("No existe el producto con ID " + detalleDto.getProducto()));
+                        .orElseThrow(() -> new ServiceException("No existe el producto con ID " + detalleDto.getProducto()));
 
                 // Preparar el detalle con los datos actualizados
                 FacturaDetalleEntity detalleEntity = new FacturaDetalleEntity();
@@ -344,13 +343,14 @@ public class FacturaCabeceraService implements IBaseService<FacturaCabeceraDto> 
             updatedDto.setFacturaDetalles(detalles);
 
             return updatedDto;
+        } catch (NotFoundException e) {
+            logger.error("Rollback triggered - Cliente no encontrado, id={}", id);
+            throw e;
         } catch (Exception e) {
-            logger.error("Error al actualizar la factura", e);
-            throw new ControllerRequestException("Error al actualizar la factura", e);
+            logger.error("Rollback triggered - Error al actualizar la factura: {}, Parameters: id={}", e.getMessage(), id);
+            throw new ServiceException("Error al actualizar la factura");
         }
     }
-
-
 
 
     @Transactional(readOnly = true)
@@ -365,11 +365,10 @@ public class FacturaCabeceraService implements IBaseService<FacturaCabeceraDto> 
 
             return new PageImpl<>(cabeceraDtos, pageable, facturaEntities.getTotalElements());
         } catch (Exception e) {
-            logger.error("Error al buscar facturas por nombre de cliente o número de factura", e);
-            throw new ControllerRequestException("Error al buscar facturas", e);
+            logger.error("Rollback triggered - Error al buscar la factura: {}, nombre={}, numero de factura={}", e.getMessage(), nombre, numeroFactura);
+            throw new ServiceException("Error al buscar la factura");
         }
     }
-
 
 
     public String generateFacturaNumber() {

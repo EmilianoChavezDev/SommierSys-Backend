@@ -1,11 +1,12 @@
 package org.sommiersys.sommiersys.service.producto;
 
+import jakarta.ws.rs.NotFoundException;
+import org.hibernate.service.spi.ServiceException;
 import org.pack.sommierJar.dto.producto.ProductoDto;
 import org.pack.sommierJar.entity.producto.ProductoEntity;
 import org.pack.sommierJar.entity.proveedor.ProveedorEntity;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.sommiersys.sommiersys.common.exception.ControllerRequestException;
 import org.sommiersys.sommiersys.repository.producto.ProductoRepository;
 import org.sommiersys.sommiersys.repository.proveedor.ProveedorRepository;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -54,8 +55,8 @@ public class ProductoService {
 
             return result;
         } catch (Exception e) {
-            logger.error("Error al listar los productos", e);
-            throw new ControllerRequestException("Error al listar los productos", e);
+            logger.error("Rollback triggered - Error al buscar los productos: {}", e.getMessage());
+            throw new ServiceException("Error al buscar los productos");
         }
     }
 
@@ -65,9 +66,12 @@ public class ProductoService {
     public Optional<ProductoDto> findById(Long id) {
         try {
             return productoRepository.findById(id).map(this::convertToDto);
+        } catch (NotFoundException e) {
+            logger.error("Rollback triggered - Producto no encontrado, id={}", id);
+            throw e;
         } catch (Exception e) {
-            logger.error("Error al buscar el producto con ID " + id, e);
-            throw new ControllerRequestException("Error al buscar el producto", e);
+            logger.error("Rollback triggered - Error al buscar el producto: {}, id={}", e.getMessage(), id);
+            throw new ServiceException("Error al buscar el producto");
         }
     }
 
@@ -78,8 +82,8 @@ public class ProductoService {
             ProductoEntity savedEntity = productoRepository.save(entity);
             return convertToDto(savedEntity);
         } catch (Exception e) {
-            logger.error("Error al guardar el producto", e);
-            throw new ControllerRequestException("Error al guardar el producto", e);
+            logger.error("Rollback triggered - Error al guardar el producto: {}", e.getMessage());
+            throw new ServiceException("Error al guardar el producto");
         }
     }
 
@@ -88,9 +92,12 @@ public class ProductoService {
     public void delete(Long id) {
         try {
             productoRepository.deleteById(id);
+        } catch (NotFoundException e) {
+            logger.error("Rollback triggered - Parameters: id={}", id);
+            throw e;
         } catch (Exception e) {
-            logger.error("Error al eliminar el producto con ID " + id, e);
-            throw new ControllerRequestException("Error al eliminar el producto", e);
+            logger.error("Rollback triggered - Error al borrar el producto: {}, Parameters: id={}", e.getMessage(), id);
+            throw new ServiceException("Error al borrar el producto");
         }
     }
 
@@ -98,15 +105,17 @@ public class ProductoService {
     @CachePut(cacheManager = "cacheManagerWithoutTTL", value = "sd", key = "'api_producto_' + #id")
     public ProductoDto update(Long id, ProductoDto dto) {
         try {
-            ProductoEntity existingEntity = productoRepository.findById(id)
-                    .orElseThrow(() -> new ControllerRequestException("No existe el producto con ID " + id));
+            ProductoEntity existingEntity = productoRepository.findById(id).orElseThrow(() -> new ServiceException("No existe el producto con ID " + id));
             ProductoEntity updatedEntity = convertToEntity(dto);
             updatedEntity.setId(existingEntity.getId());
             productoRepository.save(updatedEntity);
             return convertToDto(updatedEntity);
+        } catch (NotFoundException e) {
+            logger.error("Rollback triggered - Producto no encontrado, id={}", id);
+            throw e;
         } catch (Exception e) {
-            logger.error("Error al actualizar el producto con ID " + id, e);
-            throw new ControllerRequestException("Error al actualizar el producto", e);
+            logger.error("Rollback triggered - Error al actualizar el Producto: {}, Parameters: id={}", e.getMessage(), id);
+            throw new ServiceException("Error al actualizar el producto");
         }
     }
 
@@ -128,8 +137,8 @@ public class ProductoService {
 
             return result;
         } catch (Exception e) {
-            logger.error("Error al buscar productos por nombre " + nombre, e);
-            throw new ControllerRequestException("Error al buscar los productos", e);
+            logger.error("Rollback triggered - Error al buscar el cliente: {}, nombre={}", e.getMessage(), nombre);
+            throw new ServiceException("Error al buscar el cliente");
         }
     }
 
@@ -160,8 +169,7 @@ public class ProductoService {
         entity.setCantidad(dto.getCantidad());
 
         if (dto.getProveedor() != null) {
-            ProveedorEntity proveedor = proveedorRepository.findById(dto.getProveedor())
-                    .orElseThrow(() -> new ControllerRequestException("No existe el proveedor con ID " + dto.getProveedor()));
+            ProveedorEntity proveedor = proveedorRepository.findById(dto.getProveedor()).orElseThrow(() -> new ServiceException("No existe el proveedor con ID " + dto.getProveedor()));
             entity.setProveedor(proveedor);
         } else {
             entity.setProveedor(null);

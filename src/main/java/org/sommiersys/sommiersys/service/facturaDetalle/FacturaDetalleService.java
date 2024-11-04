@@ -1,9 +1,11 @@
 package org.sommiersys.sommiersys.service.facturaDetalle;
 
+import org.hibernate.service.spi.ServiceException;
 import org.pack.sommierJar.dto.facturaDetalle.FacturaDetalleDto;
 import org.pack.sommierJar.entity.facturaDetalle.FacturaDetalleEntity;
 import org.pack.sommierJar.entity.producto.ProductoEntity;
-import org.sommiersys.sommiersys.common.exception.ControllerRequestException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.sommiersys.sommiersys.common.interfaces.IBaseService;
 import org.sommiersys.sommiersys.repository.facturaDetalle.FacturaDetalleRepository;
 import org.sommiersys.sommiersys.repository.producto.ProductoRepository;
@@ -11,9 +13,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.util.Optional;
 
@@ -34,8 +35,8 @@ public class FacturaDetalleService implements IBaseService<FacturaDetalleDto> {
             return facturaDetalleRepository.findAll(pageable)
                     .map(this::entityToDto);
         } catch (Exception e) {
-            logger.error("Error al obtener todos los detalles de factura", e);
-            throw new ControllerRequestException("Error al obtener todos los detalles de factura", e);
+            logger.error("Rollback triggered - Error al obtener todos los detalles de factura", e);
+            throw new ServiceException("Error al obtener todos los detalles de factura", e);
         }
     }
 
@@ -45,8 +46,8 @@ public class FacturaDetalleService implements IBaseService<FacturaDetalleDto> {
             return facturaDetalleRepository.findById(id)
                     .map(this::entityToDto);
         } catch (Exception e) {
-            logger.error("Error al obtener el detalle de factura con ID: " + id, e);
-            throw new ControllerRequestException("Error al obtener el detalle de factura", e);
+            logger.error("Rollback triggered - Error al obtener el detalle de factura con ID: {}", id, e);
+            throw new ServiceException("Error al obtener el detalle de factura", e);
         }
     }
 
@@ -59,8 +60,8 @@ public class FacturaDetalleService implements IBaseService<FacturaDetalleDto> {
             FacturaDetalleEntity savedEntity = facturaDetalleRepository.save(entity);
             return entityToDto(savedEntity);
         } catch (Exception e) {
-            logger.error("Error al guardar el detalle de factura", e);
-            throw new ControllerRequestException("Error al guardar el detalle de factura", e);
+            logger.error("Rollback triggered - Error al guardar el detalle de factura", e);
+            throw new ServiceException("Error al guardar el detalle de factura", e);
         }
     }
 
@@ -80,27 +81,30 @@ public class FacturaDetalleService implements IBaseService<FacturaDetalleDto> {
                 FacturaDetalleEntity updatedEntity = facturaDetalleRepository.save(entity);
                 return entityToDto(updatedEntity);
             } else {
-                throw new ControllerRequestException("Detalle de factura no encontrado con ID: " + id);
+                throw new ServiceException("Detalle de factura no encontrado con ID: " + id);
             }
         } catch (Exception e) {
-            logger.error("Error al actualizar el detalle de factura con ID: " + id, e);
-            throw new ControllerRequestException("Error al actualizar el detalle de factura", e);
+            logger.error("Rollback triggered - Error al actualizar el detalle de factura con ID: {}", id, e);
+            throw new ServiceException("Error al actualizar el detalle de factura", e);
         }
     }
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
+    @Transactional(propagation = Propagation.NOT_SUPPORTED, rollbackFor = Exception.class, timeout = 10)
     public void delete(Long id) {
         try {
-            facturaDetalleRepository.findById(id).ifPresent(entity -> {
-                entity.setDeleted(true); // Soft delete
-                facturaDetalleRepository.save(entity);
-            });
+            FacturaDetalleEntity car = facturaDetalleRepository.findById(id)
+                    .orElseThrow(() -> new ServiceException("Detalle de factura no encontrado con ID: " + id));
+            facturaDetalleRepository.delete(car);
+        } catch (ServiceException e) {
+            logger.error("Rollback triggered - Parameters: id={}", id);
+            throw e;
         } catch (Exception e) {
-            logger.error("Error al eliminar el detalle de factura con ID: " + id, e);
-            throw new ControllerRequestException("Error al eliminar el detalle de factura", e);
+            logger.error("Rollback triggered - Error al eliminar el detalle de factura con ID: {}, Error: {}", id, e.getMessage());
+            throw new ServiceException("Error al eliminar el detalle de factura");
         }
     }
+
 
     // Método para calcular el subtotal basado en cantidad y precio unitario
     private Double calcularSubtotal(FacturaDetalleEntity entity) {
@@ -113,7 +117,7 @@ public class FacturaDetalleService implements IBaseService<FacturaDetalleDto> {
         dto.setId(entity.getId());
         dto.setCantidad(entity.getCantidad());
         dto.setPrecioUnitario(entity.getPrecioUnitario());
-        dto .setSubtotal(entity.getSubtotal());
+        dto.setSubtotal(entity.getSubtotal());
         dto.setIva5(entity.getIva5());
         dto.setIva10(entity.getIva10());
         // Mapear otros campos según sea necesario
@@ -131,7 +135,7 @@ public class FacturaDetalleService implements IBaseService<FacturaDetalleDto> {
 
         // Asignar el producto a la entidad
         ProductoEntity producto = productoRepository.findById(dto.getProducto())
-                .orElseThrow(() -> new ControllerRequestException("Producto no encontrado con ID: " + dto.getProducto()));
+                .orElseThrow(() -> new ServiceException("Producto no encontrado con ID: " + dto.getProducto()));
         entity.setProducto(producto);
 
         return entity;

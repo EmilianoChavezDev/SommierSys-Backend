@@ -14,13 +14,13 @@ import java.util.Optional;
 
 public interface IBaseController<E> {
 
-    @GetMapping("/")
+    @GetMapping()
     ResponseEntity<Page<E>> findAll(final Pageable pageable);
 
     @GetMapping("/{id}")
     ResponseEntity<Optional<E>> findById(@Validated Long id);
 
-    @PostMapping("/")
+    @PostMapping()
     ResponseEntity<E> save(@Validated final E dto);
 
     @PutMapping("/{id}")
