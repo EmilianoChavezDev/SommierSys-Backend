@@ -9,54 +9,70 @@ import org.apache.pdfbox.pdmodel.font.PDType1Font;
 import org.apache.pdfbox.pdmodel.font.Standard14Fonts;
 import org.pack.sommierJar.entity.facturaCabecera.FacturaCabeceraEntity;
 import org.pack.sommierJar.entity.facturaDetalle.FacturaDetalleEntity;
+import org.sommiersys.sommiersys.repository.facturaDetalle.FacturaDetalleRepository;
 
 import java.io.IOException;
 import java.util.List;
 public class FacturaPDF {
+
+    FacturaDetalleRepository detalleRepository;
+
+    public FacturaPDF(FacturaDetalleRepository detalleRepository) {
+        this.detalleRepository = detalleRepository;
+    }
+
     public PDDocument generarFactura(FacturaCabeceraEntity factura) {
-        PDFont pdfFont=  new PDType1Font(Standard14Fonts.FontName.HELVETICA_BOLD);
+        PDFont pdfFont = new PDType1Font(Standard14Fonts.FontName.HELVETICA_BOLD);
+        PDDocument document = new PDDocument();
+        PDPage page = new PDPage();
+        document.addPage(page);
 
-        try {
-            // Crear un documento PDF
-            PDDocument document = new PDDocument();
-            PDPage page = new PDPage();
-            document.addPage(page);
-
-            // Crear un flujo de contenido en la página PDF
-            PDPageContentStream contentStream = new PDPageContentStream(document, page);
-
-            // Agregar contenido a la factura (nombre del cliente, fecha, detalles, total, etc.)
+        try (PDPageContentStream contentStream = new PDPageContentStream(document, page)) {
             contentStream.beginText();
             contentStream.setFont(pdfFont, 12);
             contentStream.newLineAtOffset(100, 700);
+
+            // Agregar información de la factura
             contentStream.showText("Factura para: " + factura.getCliente().getNombre());
             contentStream.newLineAtOffset(0, -20);
+            contentStream.showText("Fecha: " + factura.getFecha());
             contentStream.newLineAtOffset(0, -20);
             contentStream.showText("Detalles de la factura:");
+
             // Agregar detalles de la factura
-            List<FacturaDetalleEntity> detalles = factura.getFacturaDetalles();
             double total = 0.0;
-            for (FacturaDetalleEntity detalle : detalles) {
+//            if (factura.getFacturaDetalles().size()<= 0) {
+//                System.out.printf("NO HAY FACUTRAS DETALLES");
+//            }
+//            else {
+//                System.out.printf("Si hay ");
+//            }
+            List<FacturaDetalleEntity> facturaDetalles = detalleRepository.findAllbyFacturaId(factura.getId());
+
+//            if (facturaDetalles.size()<= 0) {
+//                System.out.printf("NO FUNCIONA ESTA PORQUERIA DE MIERDA ");
+//            }
+//            else {
+//                System.out.printf("Si FUNCIONA  ");
+//            }
+            for (FacturaDetalleEntity detalle : facturaDetalles ) {
                 contentStream.newLineAtOffset(0, -20);
+                String detalleTexto = "Producto: " + detalle.getProducto().getNombre() +
+                        ", Cantidad: " + detalle.getCantidad() +
+                        ", Precio Unitario: " + detalle.getPrecioUnitario() +
+                        ", Subtotal: " + detalle.getSubtotal();
+                contentStream.showText(detalleTexto);
                 total += detalle.getSubtotal();
             }
 
             contentStream.newLineAtOffset(0, -20);
             contentStream.showText("Total: $" + total);
             contentStream.endText();
-
-            // Cerrar el flujo de contenido
-            contentStream.close();
-
-            // Guardar el documento PDF en un archivo o transmitirlo
-            // document.save("factura.pdf");
-
-            // Cerrar el documento PDF
-            //document.close();
-            return  document;
         } catch (IOException e) {
             e.printStackTrace();
         }
-        return null;
+
+        return document;
     }
+
 }

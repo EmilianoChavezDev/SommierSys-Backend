@@ -15,6 +15,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDateTime;
 import java.util.Optional;
 
 @RestController
@@ -32,7 +33,7 @@ public class FacturaCabeceraController implements IBaseController<FacturaCabecer
     }
 
 
-    @GetMapping("/findAllProductos")
+    @GetMapping("/findAllFacturas")
     public ResponseEntity<Page<FacturaCabeceraDto>> findAllFacturas(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size,
@@ -93,4 +94,24 @@ public class FacturaCabeceraController implements IBaseController<FacturaCabecer
         Page<FacturaCabeceraDto> results = facturaCabeceraService.findByClienteNombreOrNumeroFactura(pageable, nombre, numeroFactura);
         return ResponseEntity.ok(results);
     }
+
+    @GetMapping("/findByFecha")
+    public ResponseEntity<Page<FacturaCabeceraDto>> buscarPorNumeroFacturaYFecha(
+            @RequestParam(required = false) String numeroFactura,
+            @RequestParam LocalDateTime startDate,
+            @RequestParam LocalDateTime endDate,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(defaultValue = "asc") String sort) {
+
+        // Define la dirección de ordenamiento
+        Sort sortDirection = sort.equalsIgnoreCase("asc") ? Sort.by("createdAt").ascending() : Sort.by("createdAt").descending();
+        PageRequest pageRequest = PageRequest.of(page, size, sortDirection);
+
+        // Llama al servicio para buscar las facturas
+        Page<FacturaCabeceraDto> facturas = facturaCabeceraService.findByNumeroFacturaAndFecha(pageRequest, numeroFactura, startDate, endDate);
+
+        return ResponseEntity.ok(facturas);
+    }
+
 }

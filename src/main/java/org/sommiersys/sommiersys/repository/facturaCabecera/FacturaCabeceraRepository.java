@@ -44,4 +44,19 @@ public interface FacturaCabeceraRepository extends JpaRepository<FacturaCabecera
 
     @Query(value = "SELECT * FROM FACTURAS_CABECERA WHERE CREATED_AT BETWEEN :startDate AND :endDate", nativeQuery = true)
     Page<FacturaCabeceraEntity> findByCreatedAtBetween(LocalDateTime startDate, LocalDateTime endDate, Pageable pageable);
+
+
+    @Query(value = "SELECT fc.* FROM FACTURAS_CABECERA fc " +
+            "WHERE (:numeroFactura IS NULL OR fc.NUMERO_FACTURA ILIKE %:numeroFactura%) " +
+            "AND (:startDate IS NULL OR fc.CREATED_AT >= :startDate) " +
+            "AND (:endDate IS NULL OR fc.CREATED_AT <= :endDate) " +
+            "AND fc.deleted = :deleted",
+            nativeQuery = true)
+    Page<FacturaCabeceraEntity> findByNumeroFacturaAndFecha(
+            Pageable pageable,
+            @Param("numeroFactura") String numeroFactura,
+            @Param("startDate") LocalDateTime startDate,
+            @Param("endDate") LocalDateTime endDate,
+            @Param("deleted") boolean deleted);
+
 }

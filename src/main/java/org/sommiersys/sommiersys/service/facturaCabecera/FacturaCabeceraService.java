@@ -188,8 +188,9 @@ public class FacturaCabeceraService implements IBaseService<FacturaCabeceraDto> 
                 detalles.add(detalleDto);
             }
 
+
             // Generar el PDF de la factura
-            FacturaPDF facturaPDF = new FacturaPDF();
+            FacturaPDF facturaPDF = new FacturaPDF(facturaDetalleRepository);
             PDDocument pdfDocument = facturaPDF.generarFactura(savedEntity);
 
             // Convertir el PDF a un array de bytes
@@ -206,6 +207,7 @@ public class FacturaCabeceraService implements IBaseService<FacturaCabeceraDto> 
             String cuerpo = "Adjunto encontrarás la factura correspondiente.";
             String nombreArchivoPDF = "Factura_" + savedEntity.getNumeroFactura() + ".pdf";
 
+
             emailService.sendEmailWithPDFAttachment(destinatario, asunto, cuerpo, pdfBytes, nombreArchivoPDF);
 
             // Devolver el DTO de la factura guardada
@@ -214,7 +216,7 @@ public class FacturaCabeceraService implements IBaseService<FacturaCabeceraDto> 
             return cabeDto;
         } catch (Exception e) {
             logger.error("Rollback triggered - Error al guardar la factura: {}", e.getMessage());
-            throw new ServiceException("Error al guardar la factura");
+            throw new ServiceException("Error al guardar la factura", e);
         }
     }
 
@@ -348,7 +350,7 @@ public class FacturaCabeceraService implements IBaseService<FacturaCabeceraDto> 
             throw e;
         } catch (Exception e) {
             logger.error("Rollback triggered - Error al actualizar la factura: {}, Parameters: id={}", e.getMessage(), id);
-            throw new ServiceException("Error al actualizar la factura");
+            throw new ServiceException("Error al actualizar la factura", e);
         }
     }
 
@@ -369,6 +371,27 @@ public class FacturaCabeceraService implements IBaseService<FacturaCabeceraDto> 
             throw new ServiceException("Error al buscar la factura");
         }
     }
+
+
+    @Transactional(readOnly = true)
+    public Page<FacturaCabeceraDto> findByNumeroFacturaAndFecha(Pageable pageable,
+                                                                String numeroFactura,
+                                                                LocalDateTime startDate,
+                                                                LocalDateTime endDate) {
+        // Llama al repositorio para buscar las facturas
+        Page<FacturaCabeceraEntity> facturaEntities = facturaCabeceraRepository.findByNumeroFacturaAndFecha(
+                pageable, numeroFactura, startDate, endDate, false); // Suponiendo que 'false' es para el estado no eliminado
+
+        // Convierte las entidades en DTOs utilizando el MapperFactura
+        List<FacturaCabeceraDto> cabeceraDtos = facturaEntities
+                .stream()
+                .map(entity -> MapperFactura.toDto(entity, cacheManager))
+                .collect(Collectors.toList());
+
+        // Retorna el resultado paginado
+        return new PageImpl<>(cabeceraDtos, pageable, facturaEntities.getTotalElements());
+    }
+
 
 
     public String generateFacturaNumber() {
